@@ -35,7 +35,113 @@ public class AlertGenerator {
      * @param patient the patient data to evaluate for alert conditions
      */
     public void evaluateData(Patient patient) {
-        // Implementation goes here
+        // Get all records for this patient
+        java.util.List<com.data_management.PatientRecord> allRecords = patient.getRecords(Long.MIN_VALUE, Long.MAX_VALUE);
+        // Sort records by timestamp
+        allRecords.sort(new java.util.Comparator<com.data_management.PatientRecord>() {
+            public int compare(com.data_management.PatientRecord r1, com.data_management.PatientRecord r2) {
+                return Long.compare(r1.getTimestamp(), r2.getTimestamp());
+            }
+        });
+
+        // Blood Pressure Alerts
+        java.util.List<com.data_management.PatientRecord> bloodPressureRecords = new java.util.ArrayList<>();
+        for (int i = 0; i < allRecords.size(); i++) {
+            com.data_management.PatientRecord record = allRecords.get(i);
+            if (record.getRecordType().equalsIgnoreCase("BloodPressure")) {
+                bloodPressureRecords.add(record);
+            }
+        }
+        // Trend Alert: 3 consecutive readings, each >10 mmHg change
+        for (int i = 2; i < bloodPressureRecords.size(); i++) {
+            double first = bloodPressureRecords.get(i-2).getMeasurementValue();
+            double second = bloodPressureRecords.get(i-1).getMeasurementValue();
+            double third = bloodPressureRecords.get(i).getMeasurementValue();
+            if ((second - first > 10 && third - second > 10) || (first - second > 10 && second - third > 10)) {
+                Alert alert = new Alert(String.valueOf(patient.getPatientId()), "Blood Pressure Trend Alert", bloodPressureRecords.get(i).getTimestamp());
+                triggerAlert(alert);
+            }
+        }
+        // Critical Threshold Alert
+        for (int i = 0; i < bloodPressureRecords.size(); i++) {
+            com.data_management.PatientRecord record = bloodPressureRecords.get(i);
+            double value = record.getMeasurementValue();
+            if (value > 180 || value < 90 || value > 120 || value < 60) {
+                Alert alert = new Alert(String.valueOf(patient.getPatientId()), "Critical Blood Pressure Alert", record.getTimestamp());
+                triggerAlert(alert);
+            }
+        }
+
+        // Blood Saturation Alerts
+        java.util.List<com.data_management.PatientRecord> saturationRecords = new java.util.ArrayList<>();
+        for (int i = 0; i < allRecords.size(); i++) {
+            com.data_management.PatientRecord record = allRecords.get(i);
+            if (record.getRecordType().equalsIgnoreCase("Saturation")) {
+                saturationRecords.add(record);
+            }
+        }
+        for (int i = 0; i < saturationRecords.size(); i++) {
+            double saturationValue = saturationRecords.get(i).getMeasurementValue();
+            if (saturationValue < 92) {
+                Alert alert = new Alert(String.valueOf(patient.getPatientId()), "Low Saturation Alert", saturationRecords.get(i).getTimestamp());
+                triggerAlert(alert);
+            }
+            // Rapid Drop Alert: drop of 5% or more within 10 minutes
+            for (int j = i+1; j < saturationRecords.size(); j++) {
+                double nextSaturationValue = saturationRecords.get(j).getMeasurementValue();
+                long firstTimestamp = saturationRecords.get(i).getTimestamp();
+                long secondTimestamp = saturationRecords.get(j).getTimestamp();
+                if (secondTimestamp - firstTimestamp <= 10 * 60 * 1000 && saturationValue - nextSaturationValue >= 5) {
+                    Alert alert = new Alert(String.valueOf(patient.getPatientId()), "Rapid Saturation Drop Alert", saturationRecords.get(j).getTimestamp());
+                    triggerAlert(alert);
+                }
+            }
+        }
+
+        // Combined Alert: Hypotensive Hypoxemia
+        for (int i = 0; i < bloodPressureRecords.size(); i++) {
+            com.data_management.PatientRecord bpRecord = bloodPressureRecords.get(i);
+            for (int j = 0; j < saturationRecords.size(); j++) {
+                com.data_management.PatientRecord satRecord = saturationRecords.get(j);
+                if (Math.abs(bpRecord.getTimestamp() - satRecord.getTimestamp()) < 5 * 60 * 1000) {
+                    if (bpRecord.getMeasurementValue() < 90 && satRecord.getMeasurementValue() < 92) {
+                        Alert alert = new Alert(String.valueOf(patient.getPatientId()), "Hypotensive Hypoxemia Alert", Math.max(bpRecord.getTimestamp(), satRecord.getTimestamp()));
+                        triggerAlert(alert);
+                    }
+                }
+            }
+        }
+
+        // ECG Data Alerts (simple peak detection)
+        java.util.List<com.data_management.PatientRecord> ecgRecords = new java.util.ArrayList<>();
+        for (int i = 0; i < allRecords.size(); i++) {
+            com.data_management.PatientRecord record = allRecords.get(i);
+            if (record.getRecordType().equalsIgnoreCase("ECG")) {
+                ecgRecords.add(record);
+            }
+        }
+        int windowSize = 5;
+        for (int i = windowSize; i < ecgRecords.size(); i++) {
+            double sum = 0;
+            for (int j = i-windowSize; j < i; j++) {
+                sum += ecgRecords.get(j).getMeasurementValue();
+            }
+            double average = sum / windowSize;
+            double peak = ecgRecords.get(i).getMeasurementValue();
+            if (peak > average * 1.5) {
+                Alert alert = new Alert(String.valueOf(patient.getPatientId()), "ECG Peak Alert", ecgRecords.get(i).getTimestamp());
+                triggerAlert(alert);
+            }
+        }
+
+        // Triggered Alert (from button)
+        for (int i = 0; i < allRecords.size(); i++) {
+            com.data_management.PatientRecord record = allRecords.get(i);
+            if (record.getRecordType().equalsIgnoreCase("Alert")) {
+                Alert alert = new Alert(String.valueOf(patient.getPatientId()), "Triggered Alert", record.getTimestamp());
+                triggerAlert(alert);
+            }
+        }
     }
 
     /**
@@ -47,6 +153,7 @@ public class AlertGenerator {
      * @param alert the alert object containing details about the alert condition
      */
     private void triggerAlert(Alert alert) {
-        // Implementation might involve logging the alert or notifying staff
+        // For now, just print the alert
+        System.out.println("ALERT: Patient " + alert.getPatientId() + " - " + alert.getCondition() + " at " + alert.getTimestamp());
     }
 }
